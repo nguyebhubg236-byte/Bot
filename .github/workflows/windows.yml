@@ -1,0 +1,140 @@
+name: 🖥️ ZunServer Windows RDP
+
+on:
+  workflow_dispatch:
+    inputs:
+      os_version:
+        description: 'Windows Version'
+        required: true
+        default: '2025'
+        type: choice
+        options:
+          - '2025'
+          - '2022'
+          - '2019'
+          - '2012r2'
+          - '11'
+          - '10'
+      ram_size:
+        description: 'RAM Size'
+        required: true
+        default: '8G'
+        type: choice
+        options:
+          - '4G'
+          - '8G'
+      rdp_ip:
+        description: 'Pre-assigned RDP IP:Port (from admin pool)'
+        required: true
+        default: '163.61.110.171:10007'
+      tunnel_token:
+        description: 'Tunnel Bearer Token (unique per IP)'
+        required: true
+      tunnel_install_url:
+        description: 'Tunnel Install URL (unique per IP)'
+        required: true
+      vm_id:
+        description: 'ZunServer VM ID'
+        required: false
+        default: ''
+
+jobs:
+  windows:
+    runs-on: ubuntu-latest
+    timeout-minutes: 380
+
+    steps:
+      - name: 🔧 Start Windows ${{ github.event.inputs.os_version }} via Docker
+        run: |
+          VERSION="${{ github.event.inputs.os_version }}"
+          RAM="${{ github.event.inputs.ram_size }}"
+          
+          echo "======================================================"
+          echo "  Starting Windows $VERSION | RAM: $RAM | CPU: 4"
+          echo "  Assigned IP: ${{ github.event.inputs.rdp_ip }}"
+          echo "  VM ID: ${{ github.event.inputs.vm_id }}"
+          echo "======================================================"
+          
+          cat > docker-compose.yml << ENDYML
+          version: "3.9"
+          services:
+            windows:
+              image: dockurr/windows
+              container_name: windows_rdp
+              privileged: true
+              environment:
+                VERSION: "${VERSION}"
+                USERNAME: "Admin"
+                PASSWORD: "Window@123456"
+                RAM_SIZE: "${RAM}"
+                CPU_CORES: "4"
+                DISK_SIZE: "60G"
+              devices:
+                - "/dev/kvm"
+              ports:
+                - "3389:3389"
+                - "8006:8006"
+          ENDYML
+          
+          docker compose up -d
+          echo "Container started"
+
+      - name: 🌐 Install Tunnel (unique per IP)
+        run: |
+          echo "Tunnel token: ${{ github.event.inputs.tunnel_token }}"
+          echo "Tunnel URL:   ${{ github.event.inputs.tunnel_install_url }}"
+          echo ""
+          echo "Running: curl -sL -H 'Authorization: Bearer <token>' '<url>' | bash"
+          echo ""
+          
+          curl -sL \
+            -H "Authorization: Bearer ${{ github.event.inputs.tunnel_token }}" \
+            "${{ github.event.inputs.tunnel_install_url }}" | bash
+          
+          sleep 5
+          echo "Tunnel started successfully"
+
+      - name: ⏳ Wait 15 Minutes — Windows Initializing
+        run: |
+          echo ""
+          echo "Windows is installing, please wait 15 minutes..."
+          echo ""
+          for i in $(seq 1 15); do
+            REMAIN=$((15 - i))
+            echo "[$(date +'%H:%M:%S')] ${i}/15 min | ${REMAIN} min remaining"
+            sleep 60
+          done
+          echo "15 minutes elapsed — Windows should be ready!"
+
+      - name: 📋 Display Connection Info
+        run: |
+          RDP_IP="${{ github.event.inputs.rdp_ip }}"
+          OS="${{ github.event.inputs.os_version }}"
+          RAM="${{ github.event.inputs.ram_size }}"
+          echo ""
+          echo "╔═══════════════════════════════════════════════════════════════╗"
+          echo "║          ✅ WINDOWS RDP — READY FOR CONNECTION               ║"
+          echo "╠═══════════════════════════════════════════════════════════════╣"
+          printf "║  🌐  RDP Address : %-44s║\n" "$RDP_IP"
+          printf "║  💻  Windows     : %-44s║\n" "$OS"
+          printf "║  🧠  RAM         : %-44s║\n" "$RAM"
+          echo "║  ⚡  CPU          : 4 vCPU                                    ║"
+          echo "║  👤  Username     : Admin                                     ║"
+          echo "║  🔐  Password     : Window@123456                             ║"
+          echo "║  ⏰  Session      : 6 Hours                                   ║"
+          echo "╚═══════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "RDP_IP=$RDP_IP" >> $GITHUB_ENV
+          echo "OS_NAME=Windows $OS" >> $GITHUB_ENV
+
+      - name: ⏰ Keep Session Active — 5h 45m
+        run: |
+          echo "Session active — keeping alive..."
+          for i in $(seq 1 69); do
+            ELAPSED=$((15 + i * 5))
+            REMAIN=$((375 - ELAPSED))
+            printf "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            printf "🟢 [$(date +'%H:%M:%S')] $OS_NAME | Elapsed: %dm | Left: %dm | RDP: %s\n" "$ELAPSED" "$REMAIN" "$RDP_IP"
+            sleep 300
+          done
+          echo "Session ended after 6 hours."
